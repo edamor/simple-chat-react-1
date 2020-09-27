@@ -4,12 +4,12 @@ import { Client } from "@stomp/stompjs";
 
 
 // Generate anonymous username
-const uName = ("user" + Math.round(Math.random() * 999));
+const uName = ("user" + Math.round(Math.random() * 9999));
 
-// Instantiate new Client outside of component to prevent unwanted re-renders
-const WS_URL = "ws://localhost:8090/spring-ws";
+// Stomp over Websocket Broker URL
+const WS_URL = "ws://thawing-retreat-89546.herokuapp.com/spring-ws";
 
-
+// Create new Client instance once on page load
 const client = new Client({
   brokerURL: WS_URL,
   connectHeaders: {username: uName},
@@ -19,26 +19,18 @@ const client = new Client({
   heartbeatOutgoing: 4000,
   onDisconnect: (f) => {
     console.log(f);
-    console.log("On Disconnect")
+    console.log("On Disconnect");
   },
   logRawCommunication: true
 });
 
 
-  // onConnect: (f) => {
-  //   client.publish({destination: "/app/chat.newUser", headers: {}, body: JSON.stringify({
-  //     sender: uName, type: "CONNECT"
-  //   })})
-  // },
-
 
 export default function ChatBoxComponent(props) {
-
-  
-  
-  //Connection helpers
-  let [isConnected, setIsConnected] = useState(false);
-  function toggleConnection() {setIsConnected(!isConnected)};
+  // Date generator DD-MM-YYYY
+  let today = new Date();
+  let [day] = useState(`${today.getDate() < 10 ? "0"+today.getDate() : today.getDate()}-${today.getMonth() < 10 ? "0"+today.getMonth() : today.getMonth()}-${today.getFullYear()}`);
+    
 
   // Chat box change handler
   let [chatMsg, setChatMsg] = useState("");
@@ -46,92 +38,116 @@ export default function ChatBoxComponent(props) {
     setChatMsg(e.target.value);
   }
 
-  // Array for storing received messages
-  let [messages, setMessages] = useState([]);
-  const getMessages = useCallback((msgs) => {
-    setMessages(m => [...m, msgs])
+  // Array for storing received messages with an initial value set
+  let [messages, setMessages] = useState([
+    {
+      type: "WELCOME",
+      sender: "system",
+      content: `${uName} has entered the room.`,
+      class: "none",
+      time: day
+    }
+  ]);
+  // Method to get and process messages coming from the subscription
+  const getMessages = useCallback((m) => {
+    if (m.sender === uName) {
+      m.class = "outgoing"
+    } else m.class = "incoming";
+    setMessages(msgs => [...msgs, m])
   }, [])
 
 
-
+  // Async callback to establish the subscription to the broker
   const subscribe = useCallback(async () => {
     let waiting = await new Promise((resolve) => {
-      client.activate();
-      resolve(true);
+        client.activate();
+        resolve(true);
+    })
+    await new Promise((resolve) => {
+      client.configure({onConnect: (f) => {
+        client.publish({destination: "/app/chat.newUser", headers: {}, body: JSON.stringify({
+          sender: uName, type: "CONNECT"
+        })})
+      }})
+      resolve()
     })
     
-    if (!isConnected) {
-      await new Promise((resolve) => {
-        client.configure({onConnect: (f) => {
-          client.publish({destination: "/app/chat.newUser", headers: {}, body: JSON.stringify({
-            sender: uName, type: "CONNECT"
-          })})
-        }})
-        resolve(true)
-      })
-    }
-
     if (waiting) {
       client.configure({onConnect: () => {
-          console.log("On Connect");
-          client.subscribe("/topic/public", msg => {
-            if (msg) {
-              let parsed = JSON.parse(msg.body);
-              console.log(parsed)
-              getMessages(parsed);
-            }
-          })
-        }})
-      
+        console.log("On Connect");
+        client.subscribe("/topic/public", msg => {
+          if (msg) {
+            let parsed = JSON.parse(msg.body);
+            getMessages(parsed);
+          }
+        })
+      }})
     } 
-  }, [isConnected, getMessages])
-
-  useEffect(() => {
-    subscribe();
-    
-    
-  }, [subscribe])
-
+  }, [getMessages])
 
   
 
-  function handleSend() {
-    let date = new Date();
-    let d = date.toString();
+  
+  // Async function for sending a message to the server
+  const handleSend = async () => {
     let obj = {
       type: "CHAT",
       sender: uName,
       content: chatMsg,
-      time: d
+      time: day
     }
     let payload = JSON.stringify(obj);
-
-    client.publish({destination: "/app/chat.send", header: {}, body: payload});
-    
+    await new Promise((resolve) => {
+      client.publish({destination: "/app/chat.send", header: {}, body: payload});
+      resolve()
+    })
+    setChatMsg("");
   }
-  
 
-  console.log(messages);
 
-  
-
-  let renderMsgs = () => {
-                if (messages.length === 0) {
-                  return <li>nothing to show</li> ;
-                } else {
-                  return (
-                    messages.map(e => (
-                      <li key={e.time} >{e.content}</li>
-                    ))
-                  )
-                }
-              }
+  // Ref for scrolling to bottom element in chat thread
+  let bottomRef = useRef(null);
   
   
+  // Method to render mapped messages from subscription
+  const renderMsgs = () => (messages.map((e, index) => (
+          <p key={index} className={e.class} >
+            <span>{e.sender === uName ? "Myself" : e.sender} </span>
+            {e.content}
+            <span><i> {e.time}</i></span>
+          </p>
+        )
+      )
+    )
 
   
+    // keydownHandler
+    // const keydownHandler = useCallback((e) => {
+    //   let payload = JSON.stringify(obj);
+    //   if (e.key === "Enter") {
+    //     client.publish({destination: "/app/chat.send", header: {}, body: payload});
+    //   }
+      
+    // }, [obj]) 
 
-  
+  // Call the async callback for subscribing on page load
+  useEffect(() => {
+    subscribe();
+    if (messages.length > 3) {
+      bottomRef.current.scrollIntoView({ behavior: "smooth" })
+    }
+
+    
+
+    // Send function for handling keydown=enter
+    // window.addEventListener("keydown", keydownHandler)
+    
+
+    // Cleanup
+    // return () => (
+    //   window.removeEventListener("keydown", keydownHandler)
+    // )
+  }, [subscribe, messages])
   
   
   return (
@@ -144,20 +160,22 @@ export default function ChatBoxComponent(props) {
         </header>
         <div className="chat-body">
           <div className="chat-thread">
-            <ul>
               {renderMsgs()}
-            </ul>
+              <div ref={bottomRef} />
           </div>
           <div className="chat-message">
-            <textarea type="text" onChange={chatOnChange} >
+            <textarea 
+              type="text"
+              onChange={chatOnChange} 
+              maxLength={100}
+              rows={3}
+              value={chatMsg}
+              >
               
             </textarea>
-            <div>
+            <div className="chat-button">
               <button onClick={handleSend}>
                 Send
-              </button>
-              <button>
-                Connect
               </button>
             </div>
           </div>
