@@ -7,7 +7,7 @@ import { Client } from "@stomp/stompjs";
 const uName = ("user" + Math.round(Math.random() * 9999));
 
 // Stomp over Websocket Broker URL
-const WS_URL = "ws://thawing-retreat-89546.herokuapp.com/spring-ws";
+const WS_URL = "wss://thawing-retreat-89546.herokuapp.com/spring-ws";
 
 // Create new Client instance once on page load
 const client = new Client({
